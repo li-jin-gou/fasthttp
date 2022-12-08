@@ -300,7 +300,7 @@ func (u *URI) parse(host, uri []byte, isTLS bool) error {
 		u.SetSchemeBytes(strHTTPS)
 	}
 
-	if n := bytes.IndexByte(host, '@'); n >= 0 {
+	if n := bytes.LastIndexByte(host, '@'); n >= 0 {
 		auth := host[:n]
 		host = host[n+1:]
 
