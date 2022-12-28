@@ -1172,7 +1172,11 @@ func (h *RequestHeader) VisitAll(f func(key, value []byte)) {
 // This function is slightly slower than VisitAll because it has to reparse the
 // raw headers to get the order.
 func (h *RequestHeader) VisitAllInOrder(f func(key, value []byte)) {
-	var s headerScanner
+	s := headerScannerPool.Get().(*headerScanner)
+	defer func() {
+		s.reset()
+		headerScannerPool.Put(s)
+	}()
 	s.b = h.rawHeaders
 	s.disableNormalizing = h.disableNormalizing
 	for s.next() {
@@ -2555,7 +2559,11 @@ func (h *ResponseHeader) parseTrailer(buf []byte) (int, error) {
 		buf = buf[skip:]
 	}
 
-	var s headerScanner
+	s := headerScannerPool.Get().(*headerScanner)
+	defer func() {
+		s.reset()
+		headerScannerPool.Put(s)
+	}()
 	s.b = buf
 	s.disableNormalizing = h.disableNormalizing
 	var err error
@@ -2614,7 +2622,11 @@ func (h *RequestHeader) parseTrailer(buf []byte) (int, error) {
 		buf = buf[skip:]
 	}
 
-	var s headerScanner
+	s := headerScannerPool.Get().(*headerScanner)
+	defer func() {
+		s.reset()
+		headerScannerPool.Put(s)
+	}()
 	s.b = buf
 	s.disableNormalizing = h.disableNormalizing
 	var err error
@@ -2803,7 +2815,11 @@ func (h *ResponseHeader) parseHeaders(buf []byte) (int, error) {
 	// 'identity' content-length by default
 	h.contentLength = -2
 
-	var s headerScanner
+	s := headerScannerPool.Get().(*headerScanner)
+	defer func() {
+		s.reset()
+		headerScannerPool.Put(s)
+	}()
 	s.b = buf
 	s.disableNormalizing = h.disableNormalizing
 	var err error
@@ -2890,7 +2906,11 @@ func (h *ResponseHeader) parseHeaders(buf []byte) (int, error) {
 func (h *RequestHeader) parseHeaders(buf []byte) (int, error) {
 	h.contentLength = -2
 
-	var s headerScanner
+	s := headerScannerPool.Get().(*headerScanner)
+	defer func() {
+		s.reset()
+		headerScannerPool.Put(s)
+	}()
 	s.b = buf
 	s.disableNormalizing = h.disableNormalizing
 	var err error
@@ -3145,6 +3165,18 @@ func (s *headerScanner) next() bool {
 	return true
 }
 
+func (s *headerScanner) reset() {
+	s.b = s.b[:0]
+	s.key = s.key[:0]
+	s.value = s.value[:0]
+	s.err = nil
+	s.hLen = 0
+	s.disableNormalizing = false
+	s.nextColon = 0
+	s.nextNewLine = 0
+	s.initialized = false
+}
+
 type headerValueScanner struct {
 	b     []byte
 	value []byte
@@ -3166,6 +3198,11 @@ func (s *headerValueScanner) next() bool {
 	return true
 }
 
+func (s *headerValueScanner) reset() {
+	s.b = s.b[:0]
+	s.value = s.value[:0]
+}
+
 func stripSpace(b []byte) []byte {
 	for len(b) > 0 && b[0] == ' ' {
 		b = b[1:]
@@ -3177,7 +3214,11 @@ func stripSpace(b []byte) []byte {
 }
 
 func hasHeaderValue(s, value []byte) bool {
-	var vs headerValueScanner
+	vs := headerValueScannerPool.Get().(*headerValueScanner)
+	defer func() {
+		vs.reset()
+		headerValueScannerPool.Put(vs)
+	}()
 	vs.b = s
 	for vs.next() {
 		if caseInsensitiveCompare(vs.value, value) {
@@ -3355,9 +3396,19 @@ func appendArgsKeyBytes(dst []byte, args []argsKV, sep []byte) []byte {
 }
 
 var (
-	errNeedMore    = errors.New("need more data: cannot find trailing lf")
-	errInvalidName = errors.New("invalid header name")
-	errSmallBuffer = errors.New("small read buffer. Increase ReadBufferSize")
+	errNeedMore            = errors.New("need more data: cannot find trailing lf")
+	errInvalidName         = errors.New("invalid header name")
+	errSmallBuffer         = errors.New("small read buffer. Increase ReadBufferSize")
+	headerValueScannerPool = sync.Pool{
+		New: func() interface{} {
+			return &headerValueScanner{}
+		},
+	}
+	headerScannerPool = sync.Pool{
+		New: func() interface{} {
+			return &headerScanner{}
+		},
+	}
 )
 
 // ErrNothingRead is returned when a keep-alive connection is closed,
